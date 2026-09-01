@@ -31,6 +31,134 @@ const verdictReason = document.getElementById("verdict-reason");
 const pairBox = document.getElementById("pair");
 const detailsBox = document.getElementById("details");
 const cardTemplate = document.getElementById("card-template");
+const suggestionsBox = document.getElementById("suggestions");
+
+/* ---------- Suggestions ---------- */
+
+let allSpecies = []; // { name, id }
+let activeIndex = -1;
+let shown = [];
+
+loadSpeciesList();
+
+async function loadSpeciesList() {
+  try {
+    const list = await getJson(API + "/pokemon-species?limit=2000");
+    allSpecies = list.results.map(r => {
+      const id = Number(r.url.replace(/\/$/, "").split("/").pop());
+      return { name: r.name, id };
+    }).sort((a, b) => a.id - b.id);
+  } catch (e) {
+    // No suggestions, search still works.
+  }
+}
+
+function matchSpecies(query) {
+  const q = query.trim().toLowerCase().replace(/\s+/g, "-");
+  if (!q) return [];
+  const starts = [];
+  const contains = [];
+  for (const s of allSpecies) {
+    if (s.name.startsWith(q)) starts.push(s);
+    else if (s.name.includes(q)) contains.push(s);
+    if (starts.length >= 8) break;
+  }
+  return starts.concat(contains).slice(0, 8);
+}
+
+function showSuggestions() {
+  const query = nameInput.value;
+  shown = matchSpecies(query);
+  activeIndex = -1;
+  suggestionsBox.innerHTML = "";
+
+  if (!query.trim() || allSpecies.length === 0) { hideSuggestions(); return; }
+
+  if (shown.length === 0) {
+    const li = document.createElement("li");
+    li.className = "empty";
+    li.textContent = "No Pokémon matches \"" + query.trim() + "\"";
+    suggestionsBox.appendChild(li);
+  }
+
+  const q = query.trim().toLowerCase().replace(/\s+/g, "-");
+  shown.forEach((s, i) => {
+    const li = document.createElement("li");
+    li.setAttribute("role", "option");
+    li.id = "suggestion-" + i;
+    const img = document.createElement("img");
+    img.src = "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/" + s.id + ".png";
+    img.alt = "";
+    img.loading = "lazy";
+    li.appendChild(img);
+    const label = document.createElement("span");
+    label.innerHTML = highlight(prettyName(s.name), q);
+    li.appendChild(label);
+    li.addEventListener("mousedown", (e) => { e.preventDefault(); chooseSuggestion(i); });
+    suggestionsBox.appendChild(li);
+  });
+
+  suggestionsBox.hidden = false;
+  nameInput.setAttribute("aria-expanded", "true");
+}
+
+function highlight(text, q) {
+  const plain = q.replace(/-/g, " ");
+  const idx = text.toLowerCase().indexOf(plain);
+  if (idx < 0) return escapeHtml(text);
+  return escapeHtml(text.slice(0, idx)) + "<mark>" + escapeHtml(text.slice(idx, idx + plain.length)) + "</mark>" + escapeHtml(text.slice(idx + plain.length));
+}
+
+function escapeHtml(t) {
+  return t.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+function hideSuggestions() {
+  suggestionsBox.hidden = true;
+  suggestionsBox.innerHTML = "";
+  nameInput.setAttribute("aria-expanded", "false");
+  nameInput.removeAttribute("aria-activedescendant");
+  activeIndex = -1;
+  shown = [];
+}
+
+function setActive(i) {
+  const items = suggestionsBox.querySelectorAll("[role=option]");
+  items.forEach((li, idx) => li.setAttribute("aria-selected", idx === i ? "true" : "false"));
+  activeIndex = i;
+  if (i >= 0) {
+    nameInput.setAttribute("aria-activedescendant", "suggestion-" + i);
+    items[i].scrollIntoView({ block: "nearest" });
+  }
+}
+
+function chooseSuggestion(i) {
+  const s = shown[i];
+  if (!s) return;
+  nameInput.value = prettyName(s.name);
+  hideSuggestions();
+  form.requestSubmit();
+}
+
+nameInput.addEventListener("input", showSuggestions);
+nameInput.addEventListener("focus", showSuggestions);
+nameInput.addEventListener("blur", hideSuggestions);
+
+nameInput.addEventListener("keydown", (e) => {
+  if (suggestionsBox.hidden) return;
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    setActive(Math.min(activeIndex + 1, shown.length - 1));
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    setActive(Math.max(activeIndex - 1, -1));
+  } else if (e.key === "Enter" && activeIndex >= 0) {
+    e.preventDefault();
+    chooseSuggestion(activeIndex);
+  } else if (e.key === "Escape") {
+    hideSuggestions();
+  }
+});
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
